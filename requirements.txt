@@ -3,3 +3,5 @@ requests>=2.31
 nodriver>=0.37
 pyanylist
 aiohttp>=3.9
+apscheduler>=3.6,<4
+tzdata

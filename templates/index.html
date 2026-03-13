@@ -89,7 +89,7 @@
     {% if logs %}
       {% for entry in logs %}
         <div class="px-5 py-2 flex gap-3 text-xs font-mono">
-          <span class="text-gray-400 shrink-0">{{ entry.timestamp }}</span>
+          <span class="text-gray-400 shrink-0">{{ entry.timestamp | localtime }}</span>
           <span class="shrink-0
             {% if entry.level == 'ERROR' %}text-red-600 font-bold
             {% elif entry.level == 'WARNING' %}text-yellow-600 font-bold

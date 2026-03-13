@@ -77,3 +77,23 @@ def get_recent_logs(limit: int = 100) -> list[dict]:
 def clear_logs() -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM sync_log")
+
+
+# ── Credential reset ──────────────────────────────────────────────────────────
+
+_CREDENTIAL_KEYS = (
+    "site_password_hash",
+    "anylist_email",
+    "anylist_password",
+    "amazon_cookies",
+    "cookies_updated_at",
+)
+
+
+def reset_credentials() -> None:
+    """Delete all credentials and cookies from the settings table."""
+    with _conn() as conn:
+        conn.execute(
+            f"DELETE FROM settings WHERE key IN ({','.join('?' * len(_CREDENTIAL_KEYS))})",
+            _CREDENTIAL_KEYS,
+        )

@@ -1,15 +1,19 @@
 """Flask web application — Alexa → AnyList sync dashboard."""
 
 import asyncio
+import atexit
 import json
 import logging
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import nodriver as uc
-from flask import Flask, jsonify, redirect, render_template, request, url_for, flash
+from apscheduler.schedulers.background import BackgroundScheduler
+from flask import Flask, g, jsonify, redirect, render_template, request, url_for, flash, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import alexa
 import db
@@ -29,6 +33,153 @@ app = Flask(__name__)
 app.secret_key = "change-me-in-production"
 
 db.init_db()
+
+# ── Time zone ─────────────────────────────────────────────────────────────────
+
+TIMEZONE_GROUPS: list[tuple[str, list[str]]] = [
+    ("UTC", ["UTC"]),
+    ("Americas", [
+        "America/Anchorage",
+        "America/Los_Angeles",
+        "America/Denver",
+        "America/Phoenix",
+        "America/Chicago",
+        "America/New_York",
+        "America/Toronto",
+        "America/Halifax",
+        "America/St_Johns",
+        "America/Sao_Paulo",
+        "America/Argentina/Buenos_Aires",
+        "America/Santiago",
+        "America/Bogota",
+        "America/Lima",
+        "America/Mexico_City",
+        "Pacific/Honolulu",
+    ]),
+    ("Europe", [
+        "Europe/London",
+        "Europe/Dublin",
+        "Europe/Lisbon",
+        "Europe/Paris",
+        "Europe/Berlin",
+        "Europe/Rome",
+        "Europe/Madrid",
+        "Europe/Amsterdam",
+        "Europe/Stockholm",
+        "Europe/Helsinki",
+        "Europe/Warsaw",
+        "Europe/Athens",
+        "Europe/Bucharest",
+        "Europe/Istanbul",
+        "Europe/Moscow",
+    ]),
+    ("Africa", [
+        "Africa/Cairo",
+        "Africa/Lagos",
+        "Africa/Nairobi",
+        "Africa/Johannesburg",
+    ]),
+    ("Asia", [
+        "Asia/Dubai",
+        "Asia/Karachi",
+        "Asia/Kolkata",
+        "Asia/Colombo",
+        "Asia/Dhaka",
+        "Asia/Bangkok",
+        "Asia/Jakarta",
+        "Asia/Singapore",
+        "Asia/Shanghai",
+        "Asia/Hong_Kong",
+        "Asia/Taipei",
+        "Asia/Seoul",
+        "Asia/Tokyo",
+    ]),
+    ("Pacific / Oceania", [
+        "Australia/Perth",
+        "Australia/Darwin",
+        "Australia/Adelaide",
+        "Australia/Brisbane",
+        "Australia/Sydney",
+        "Australia/Melbourne",
+        "Pacific/Auckland",
+        "Pacific/Guam",
+    ]),
+]
+
+
+def _convert_to_local(utc_str: str | None, tz_name: str) -> str:
+    """Convert a stored UTC timestamp string to the user's local time."""
+    if not utc_str:
+        return ""
+    for fmt in ("%Y-%m-%d %H:%M:%S UTC", "%Y-%m-%d %H:%M UTC"):
+        try:
+            dt = datetime.strptime(utc_str, fmt).replace(tzinfo=timezone.utc)
+            break
+        except ValueError:
+            continue
+    else:
+        return utc_str  # unrecognized format — return as-is
+    try:
+        tz = ZoneInfo(tz_name or "UTC")
+    except (ZoneInfoNotFoundError, KeyError):
+        tz = ZoneInfo("UTC")
+    return dt.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
+
+
+# ── Site password auth ────────────────────────────────────────────────────────
+
+@app.before_request
+def _load_timezone() -> None:
+    g.user_timezone = db.get_setting("timezone") or "UTC"
+
+
+@app.template_filter("localtime")
+def localtime_filter(utc_str: str | None) -> str:
+    return _convert_to_local(utc_str, getattr(g, "user_timezone", "UTC"))
+
+
+@app.before_request
+def require_login() -> None:
+    if request.endpoint in ("login", "forgot_password", "logout", "static"):
+        return
+    site_hash = db.get_setting("site_password_hash")
+    if site_hash and not session.get("authenticated"):
+        return redirect(url_for("login", next=request.path))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    # Preserve the destination; reject external URLs
+    next_url = (request.args.get("next") or request.form.get("next") or "").strip()
+    if not next_url.startswith("/"):
+        next_url = ""
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        site_hash = db.get_setting("site_password_hash")
+        if site_hash and check_password_hash(site_hash, password):
+            session["authenticated"] = True
+            return redirect(next_url or url_for("index"))
+        flash("Incorrect password.", "error")
+
+    return render_template("login.html", next_url=next_url)
+
+
+@app.post("/logout")
+def logout():
+    session.pop("authenticated", None)
+    return redirect(url_for("login"))
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        db.reset_credentials()
+        session.clear()
+        flash("Password and credentials have been reset. Please re-enter your settings.", "info")
+        return redirect(url_for("login"))
+    return render_template("forgot_password.html")
+
 
 # ── Amazon browser-auth state ─────────────────────────────────────────────────
 # Shared across requests; protected by _auth_lock.
@@ -175,6 +326,38 @@ def _run_sync() -> bool:
     return True
 
 
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+
+_scheduler = BackgroundScheduler(timezone="UTC")
+_scheduler.start()
+
+
+def _stop_scheduler() -> None:
+    try:
+        _scheduler.shutdown(wait=False)
+    except Exception:
+        pass
+
+
+atexit.register(_stop_scheduler)
+
+
+def _apply_schedule(interval_minutes: int) -> None:
+    """Set or clear the automatic sync job. 0 or negative = disabled."""
+    _scheduler.remove_all_jobs()
+    if interval_minutes > 0:
+        _scheduler.add_job(
+            _run_sync,
+            "interval",
+            minutes=interval_minutes,
+            id="sync",
+        )
+
+
+# Resume any schedule saved in the database
+_apply_schedule(int(db.get_setting("sync_interval_minutes") or 0))
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -195,7 +378,7 @@ def index():
 @app.get("/settings")
 def settings():
     s = db.get_all_settings()
-    return render_template("settings.html", s=s)
+    return render_template("settings.html", s=s, timezone_groups=TIMEZONE_GROUPS)
 
 
 @app.post("/settings")
@@ -227,13 +410,38 @@ def settings_save():
                 "cookies_updated_at",
                 datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             )
-            flash("Settings saved.", "success")
         except (json.JSONDecodeError, ValueError) as exc:
             flash(f"Invalid cookies JSON: {exc}", "error")
             return redirect(url_for("settings"))
-    else:
-        flash("Settings saved.", "success")
 
+    # Site password
+    site_pwd = request.form.get("site_password", "").strip()
+    if site_pwd:
+        db.set_setting("site_password_hash", generate_password_hash(site_pwd))
+        session["authenticated"] = True
+    elif request.form.get("site_password_clear"):
+        db.set_setting("site_password_hash", "")
+        session.pop("authenticated", None)
+
+    # Time zone
+    tz_val = request.form.get("timezone", "").strip()
+    if tz_val:
+        db.set_setting("timezone", tz_val)
+
+    # Sync interval
+    interval_raw = request.form.get("sync_interval_minutes", "").strip()
+    if interval_raw != "":
+        try:
+            interval = int(interval_raw)  # raises ValueError for floats and non-numeric
+            if interval < 0:
+                raise ValueError("interval must be 0 or greater")
+            db.set_setting("sync_interval_minutes", str(interval))
+            _apply_schedule(interval)
+        except ValueError:
+            flash("Sync interval must be a whole number of minutes (0 to disable).", "error")
+            return redirect(url_for("settings"))
+
+    flash("Settings saved.", "success")
     return redirect(url_for("settings"))
 
 
@@ -325,6 +533,14 @@ def api_logs():
 def api_logs_clear():
     db.clear_logs()
     return jsonify({"ok": True})
+
+
+@app.get("/api/schedule/status")
+def schedule_status():
+    job = _scheduler.get_job("sync")
+    interval = int(db.get_setting("sync_interval_minutes") or 0)
+    next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
+    return jsonify({"enabled": job is not None, "interval_minutes": interval, "next_run": next_run})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

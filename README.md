@@ -1,150 +1,233 @@
-# Alexa Shopping List
+# Alexa → AnyList
 
-![Example Usage in Claude Desktop](assets/mcp.png)
+A Flask web app that syncs your Alexa shopping list to AnyList. Active Alexa items are pushed to a named AnyList list and then marked complete on Alexa so they don't accumulate.
 
-## About
+## Features
 
-Seamlessly manage your Alexa shopping list. Add, remove, and view items instantly.
-Interact with your Alexa shopping list via MCP, using AI assistants like Claude or Cursor.
+- Dashboard showing your current Alexa shopping list items
+- One-click manual sync or automatic sync on a configurable schedule
+- In-browser Amazon authentication flow to capture fresh session cookies
+- Optional site password to restrict access to the web UI
+- Forgot-password / credential reset flow to recover from lockout
+- Sync log with timestamps displayed in your configured time zone
+- Time zone selector (60+ IANA zones across all regions)
 
-> [!WARNING]
-> **Requires Manual Authentication & Cookie Refresh**
->
-> This tool uses browser cookies extracted via a manual login process.
-> Amazon sessions expire.
-> You **will** need to re-run the login script periodically (Step 5 & 6) when the tool stops working.
+## Requirements
 
-## Components
+- Python 3.11+
+- Google Chrome (for the browser-based Amazon auth flow)
+- An Amazon account with Alexa shopping list
+- An AnyList account
 
-1.  **API Server (`src/api`):** Docker container (FastAPI) talking to Alexa.
-2.  **MCP Server (`src/mcp`):** Local script providing MCP tools. Proxies to the API server.
-3.  **Login Script (`src/auth`):** Local script using Selenium for login and cookie injection.
+---
 
-## Prerequisites
-
-- Python 3.10+
-- `uv` (Install: `pip install uv` or see [astral.sh/uv](https://astral.sh/uv))
-- Docker & Docker Compose (or Docker Desktop)
-- Google Chrome (for login script)
-- Amazon Account (with Alexa)
-
-## Setup & Run
-
-**1. Clone Repository**
+## Quick start (local / development)
 
 ```bash
-# git clone <repository_url>
-cd alexa-mcp
-```
+git clone <repository_url>
+cd alexa-to-anylist
 
-**2. Configure Components**
-
-Adjust settings in the `config.py` file within each component directory:
-
-- `src/api/config.py`: API server settings (port, internal paths).
-- `src/auth/config.py`: Login script settings (Amazon URL, API location, **EMAIL/PASSWORD**).
-- `src/mcp/config.py`: MCP server settings (API location).
-
-*Ensure `AMAZON_URL` matches your region and **set your `AMAZON_EMAIL` and `AMAZON_PASSWORD` in `src/auth/config.py`**.* You only need to set these temporarily for the login script to know which Amazon URL to open; the script no longer uses them automatically.
-
-**3. Start API Server Container**
-
-Builds the image and runs the API server in the background.
-
-```bash
-docker compose up --build -d alexa_api
-```
-
-*(Use `docker compose logs -f alexa_api` to view logs; `docker compose down` to stop.)*
-
-**4. Set Up Local Environment & Install Auth Dependencies**
-
-```bash
-# In the project root (alexa-mcp)
-uv venv
+python3 -m venv .venv
 source .venv/bin/activate
-uv pip install -r src/auth/requirements.txt
+pip install -r requirements.txt
+
+python app.py
 ```
 
-**5. Run Login Script**
+The app listens on **port 5123**. Open `http://localhost:5123` in your browser, then go to **Settings** to enter your credentials.
 
-This opens a browser window to the Amazon sign-in page.
+---
+
+## Ubuntu server + nginx installation
+
+These steps deploy the app to `/srv/alexa-to-anylist` under the `www-data` user and serve it through nginx with Gunicorn.
+
+### 1. System packages
 
 ```bash
-# Ensure virtual env is active
-python -m src.auth.login
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip nginx git
 ```
 
-**6. Manual Login & Confirmation**
+Chrome is required for the browser-based Amazon auth flow.  Install it system-wide:
 
-Log in manually using the browser window opened by the script. Handle any 2FA or CAPTCHA steps presented by Amazon.
+```bash
+wget -q -O /tmp/google-chrome.deb \
+  https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y /tmp/google-chrome.deb
+```
 
-Once you are successfully logged into Amazon in that browser window, return to the terminal where you ran the script and press `ENTER`.
+### 2. Create the application directory
 
-The script will then attempt to extract the session cookies and send them to the API server.
+```bash
+sudo mkdir -p /srv/alexa-to-anylist
+sudo chown www-data:www-data /srv/alexa-to-anylist
+```
 
-**7. Test API**
+### 3. Clone the repository
 
-Verify the API server received the cookies and can access your list by opening this URL in your browser (or using `curl`):
+```bash
+sudo -u www-data git clone <repository_url> /srv/alexa-to-anylist
+```
 
-[http://127.0.0.1:8000/items/all](http://127.0.0.1:8000/items/all)
+### 4. Create the Python virtual environment and install dependencies
 
-You should see a JSON response containing your current Alexa shopping list items. If you get an error (like 401 Unauthorized or 503 Service Unavailable), check the API logs (`docker compose logs alexa_api`) and potentially rerun steps 5 & 6.
+```bash
+cd /srv/alexa-to-anylist
+sudo -u www-data python3 -m venv .venv
+sudo -u www-data .venv/bin/pip install --upgrade pip
+sudo -u www-data .venv/bin/pip install -r requirements.txt
+sudo -u www-data .venv/bin/pip install gunicorn
+```
 
-*   **API Documentation:** FastAPI automatically generates interactive documentation. You can explore all available endpoints and test them directly in your browser at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+### 5. Set a strong secret key
 
-## Troubleshooting
+The Flask session secret is hard-coded to a placeholder. Override it with an environment variable:
 
-- **MCP Server Issues:**
-    - `spawn ENOENT` (Claude Desktop): Verify absolute paths in `mcp.json`.
-    - Connection Errors/Disconnects: Check API container logs (`docker compose logs alexa_api`). Ensure API container is running and accessible (check `src/mcp/config.py`).
-    - Import Errors: Ensure dependencies installed in the correct venv (`uv pip install -r src/mcp/requirements.txt`).
-- **API Container Issues:**
-    - Startup Failure: Check logs (`docker compose logs alexa_api`).
-    - Config Errors: Verify settings in `src/api/config.py`.
-    - Port Conflicts: Ensure host port `8000` (or mapped port) is free.
-- **Login Script Issues (`src/auth/login.py`):**
-    - Import Errors: Ensure dependencies installed (`uv pip install -r src/auth/requirements.txt`).
-    - `ModuleNotFoundError: No module named 'distutils'` (on Python 3.12+): Ensure `setuptools` is included in `src/auth/requirements.txt` and dependencies are reinstalled.
-    - WebDriver Errors: Ensure Chrome is installed/updated. Check `nodriver` compatibility.
-    - Cookie Errors: Occurs if login fails or cookies cannot be extracted after successful login.
-    - API Connection Error: Ensure API container is running and reachable (check `src/auth/config.py`). Check `docker compose logs alexa_api`.
-    - Login Failures: Verify credentials in `src/auth/config.py`. Check for unexpected page changes or Captcha/2FA prompts mentioned in logs or screenshots. Amazon might change selectors (`#ap_email`, `#signInSubmit`, etc.).
-- **Tool Errors (401 Unauthorized):** Login failed or cookies expired. Rerun the login script (`python -m src.auth.login`). Ensure credentials in `src/auth/config.py` are correct and check `auth` logs for any 2FA/Captcha issues during the last run.
+```bash
+sudo -u www-data bash -c 'echo "SECRET_KEY=$(python3 -c \"import secrets; print(secrets.token_hex(32))\")" \
+  > /srv/alexa-to-anylist/.env'
+sudo chmod 600 /srv/alexa-to-anylist/.env
+```
 
-## Connecting an MCP Client (Claude Desktop / Cursor)
+Then edit `app.py` to read the variable (find the line `app.secret_key = "change-me-in-production"` and replace it):
 
-To use this server with an MCP client like Claude Desktop or Cursor, you need to add its configuration to your client's `mcp.json` file. This file tells the client how to find and run your local MCP server.
+```python
+import os
+app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
+```
 
-1.  Locate your MCP client's configuration file (often named `mcp.json`). The location varies depending on the client.
-2.  Open the file and add the following entry within the main `"mcpServers": { ... }` object:
+### 6. Create a systemd service
 
-```json
-    "alexa-shopping-list": {
-        "displayName": "Alexa Shopping List MCP",
-        "description": "MCP Server for interacting with Alexa shopping list via local API",
-        "command": "/path/to/your/alexa-mcp/.venv/bin/python",
-        "args": [
-          "-m",
-          "src.mcp.mcp_server"
-        ],
-        "workingDirectory": "/path/to/your/alexa-mcp",
-        "env": {
-          "PYTHONPATH": "/path/to/your/alexa-mcp"
-        }
+Create `/etc/systemd/system/alexa-to-anylist.service`:
+
+```ini
+[Unit]
+Description=Alexa to AnyList sync service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/srv/alexa-to-anylist
+EnvironmentFile=/srv/alexa-to-anylist/.env
+ExecStart=/srv/alexa-to-anylist/.venv/bin/gunicorn \
+    --workers 1 \
+    --bind 127.0.0.1:5123 \
+    --timeout 120 \
+    app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+> **Note:** Use a single worker (`--workers 1`). The app holds in-memory state for the browser auth flow and the APScheduler background scheduler; running multiple workers would split that state across processes.
+
+Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable alexa-to-anylist
+sudo systemctl start alexa-to-anylist
+sudo systemctl status alexa-to-anylist
+```
+
+### 7. Configure nginx
+
+Create `/etc/nginx/sites-available/alexa-to-anylist`:
+
+```nginx
+server {
+    listen 80;
+    server_name your-server-hostname-or-ip;
+
+    # Increase body size limit for cookie JSON payloads
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass         http://127.0.0.1:5123;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
     }
+}
 ```
 
-**IMPORTANT:**
+Enable the site and reload nginx:
 
-*   You **MUST** replace the placeholder absolute paths `/path/to/your/alexa-mcp` in the `command`, `workingDirectory`, and `env.PYTHONPATH` fields with the actual absolute path to **your** project directory on your machine.
-*   Ensure the `.venv` virtual environment exists at that location and has the MCP dependencies installed (`uv pip install -r src/mcp/requirements.txt`).
+```bash
+sudo ln -s /etc/nginx/sites-available/alexa-to-anylist \
+           /etc/nginx/sites-enabled/alexa-to-anylist
+sudo nginx -t
+sudo systemctl reload nginx
+```
 
-3.  Save the `mcp.json` file.
-4.  Restart your MCP client. The "Alexa Shopping List MCP" server should now be available.
+The app is now reachable on `http://your-server-hostname-or-ip`.
 
-## Sponsorship
+### 8. (Optional) HTTPS with Let's Encrypt
 
-Like this tool? Consider sponsoring the developer:
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d your-domain.example.com
+```
 
-[![Sponsor TheSethRose](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe64a0)](https://github.com/sponsors/TheSethRose)
+Certbot will update the nginx config automatically and install a renewal timer.
+
+### 9. Updating the app
+
+```bash
+cd /srv/alexa-to-anylist
+sudo -u www-data git pull
+sudo -u www-data .venv/bin/pip install -r requirements.txt
+sudo systemctl restart alexa-to-anylist
+```
+
+---
+
+## Configuration
+
+All settings are saved through the **Settings** page in the UI. Nothing requires editing config files.
+
+| Setting | Description |
+|---|---|
+| AnyList Email | Your AnyList account email |
+| AnyList Password | Your AnyList account password |
+| Target List Name | The AnyList list to sync into (default: `Shopping List`) |
+| Amazon Base URL | Your regional Amazon URL (default: `https://www.amazon.com`) |
+| Amazon Cookies | Session cookies from amazon.com (JSON array) |
+| Time Zone | IANA timezone used to display all timestamps in the UI |
+| Auto-sync interval | How often to sync automatically, in minutes (0 = disabled) |
+| Site Password | Optional password to restrict access to the web UI |
+
+## Amazon authentication
+
+Amazon session cookies are required to read your Alexa shopping list. Two methods:
+
+**Option A — Browser flow (recommended):**
+Click **Open Amazon Browser** on the dashboard. A Chrome window opens, you log in manually, then click **I've Logged In** to capture the cookies automatically.
+
+**Option B — Manual export:**
+Export cookies from your browser using the [Cookie-Editor](https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm) extension (Export → JSON format) and paste the result into the Amazon Session Cookies field on the Settings page.
+
+Amazon sessions expire periodically. When sync stops working, re-authenticate using either method above.
+
+## Forgot password
+
+If you are locked out, click **Forgot password?** on the login page. This clears the site password, AnyList credentials, and Amazon cookies from the database. You can then re-enter your settings without needing the old password.
+
+## Automatic sync
+
+Set **Auto-sync interval** on the Settings page to a positive number of minutes. The scheduler runs in the background and logs each run to the sync log on the dashboard. Set to `0` to disable.
+
+## Running tests
+
+```bash
+pip install pytest pytest-mock
+pytest tests/
+```
+

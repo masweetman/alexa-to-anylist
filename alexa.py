@@ -41,6 +41,9 @@ def _build_session() -> requests.Session | None:
     except json.JSONDecodeError as exc:
         logger.error("Failed to parse Amazon cookies JSON: %s", exc)
         return None
+    if not isinstance(cookies_list, list):
+        logger.error("Amazon cookies JSON must be an array, got %s", type(cookies_list).__name__)
+        return None
 
     session = requests.Session()
     session.headers.update(_DEFAULT_HEADERS)
@@ -48,12 +51,12 @@ def _build_session() -> requests.Session | None:
         name = c.get("name")
         value = c.get("value")
         if name and value:
-            session.cookies.set(
-                name=name,
-                value=value,
-                domain=c.get("domain"),
-                path=c.get("path"),
-            )
+            kwargs: dict[str, Any] = {}
+            if c.get("domain"):
+                kwargs["domain"] = c["domain"]
+            if c.get("path"):
+                kwargs["path"] = c["path"]
+            session.cookies.set(name=name, value=value, **kwargs)
     return session
 
 
