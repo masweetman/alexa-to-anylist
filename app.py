@@ -15,7 +15,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import nodriver as uc
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, g, jsonify, redirect, render_template, request, url_for, flash, session
+from werkzeug.wrappers import Response
 from werkzeug.security import check_password_hash, generate_password_hash
+
 
 import alexa
 import db
@@ -149,7 +151,7 @@ def localtime_filter(utc_str: str | None) -> str:
 
 
 @app.before_request
-def require_login() -> None:
+def require_login() -> Response | None:
     if request.endpoint in ("login", "forgot_password", "logout", "static"):
         return
     site_hash = db.get_setting("site_password_hash")
@@ -289,7 +291,7 @@ def _run_sync() -> bool:
     # 2. Push to AnyList via pyanylist
     email = db.get_setting("anylist_email", "")
     password = db.get_setting("anylist_password", "")
-    list_name = db.get_setting("anylist_list_name", "Shopping List")
+    list_name = db.get_setting("anylist_list_name") or "Shopping List"
 
     if not email or not password:
         db.add_log("ERROR", "AnyList credentials not configured — see Settings")
