@@ -4,6 +4,8 @@ import asyncio
 import atexit
 import json
 import logging
+import os
+import secrets
 import threading
 import time
 from datetime import datetime, timezone
@@ -30,7 +32,15 @@ logger = logging.getLogger(__name__)
 # ── App & DB init ─────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
-app.secret_key = "change-me-in-production"
+
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    _secret_key = secrets.token_hex(32)
+    logging.getLogger(__name__).warning(
+        "SECRET_KEY environment variable not set — using a random key. "
+        "Sessions will not survive restarts. Set SECRET_KEY in production."
+    )
+app.secret_key = _secret_key
 
 db.init_db()
 

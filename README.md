@@ -82,7 +82,7 @@ sudo -u www-data .venv/bin/pip install gunicorn
 
 ### 5. Set a strong secret key
 
-The Flask session secret is hard-coded to a placeholder. Override it with an environment variable:
+The app reads its Flask session secret from the `SECRET_KEY` environment variable. Generate one and write it to the `.env` file that the systemd service will load:
 
 ```bash
 sudo -u www-data bash -c 'echo "SECRET_KEY=$(python3 -c \"import secrets; print(secrets.token_hex(32))\")" \
@@ -90,12 +90,7 @@ sudo -u www-data bash -c 'echo "SECRET_KEY=$(python3 -c \"import secrets; print(
 sudo chmod 600 /srv/alexa-to-anylist/.env
 ```
 
-Then edit `app.py` to read the variable (find the line `app.secret_key = "change-me-in-production"` and replace it):
-
-```python
-import os
-app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
-```
+> **Note:** If `SECRET_KEY` is not set, the app will generate a random key at startup and log a warning. Sessions will not survive restarts and cookies can be forged. Always set this variable in production.
 
 ### 6. Create a systemd service
 
