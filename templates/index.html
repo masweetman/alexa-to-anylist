@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Alexa → AnyList{% endblock %}
+
+{% block content %}
+
+<!-- Header row -->
+<div class="flex items-center justify-between">
+  <h1 class="text-2xl font-bold text-gray-800">Dashboard</h1>
+  <form method="post" action="/sync">
+    <button type="submit"
+            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold
+                   px-5 py-2 rounded-lg shadow-sm transition-colors">
+      ▶ Sync Now
+    </button>
+  </form>
+</div>
+
+<!-- Warning: no cookies configured -->
+{% if no_cookies %}
+<div class="rounded-md bg-yellow-50 border border-yellow-200 px-4 py-3 text-sm text-yellow-800">
+  ⚠ No Amazon cookies configured.
+  <a href="/settings" class="underline font-medium">Go to Settings</a> to add them.
+</div>
+{% endif %}
+
+<!-- Warning: Alexa API error -->
+{% if alexa_error %}
+<div class="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
+  ✖ Could not reach the Alexa API. Cookies may be expired —
+  <a href="/settings" class="underline font-medium">refresh them in Settings</a>.
+</div>
+{% endif %}
+
+<!-- Alexa items -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+    <h2 class="font-semibold text-gray-700">Alexa Shopping List</h2>
+    <span class="text-xs text-gray-400">{{ items | length }} item(s)</span>
+  </div>
+  {% if items %}
+    <ul class="divide-y divide-gray-100">
+      {% for item in items %}
+        <li class="px-5 py-3 text-sm text-gray-700">{{ item.value }}</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="px-5 py-4 text-sm text-gray-400 italic">
+      No active items{% if no_cookies or alexa_error %} (could not fetch list){% else %} — list is empty{% endif %}.
+    </p>
+  {% endif %}
+</div>
+
+<!-- Amazon auth card -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <div class="px-5 py-4 border-b border-gray-100">
+    <h2 class="font-semibold text-gray-700">Amazon Authentication</h2>
+    <p class="text-xs text-gray-400 mt-0.5">
+      Opens Amazon in your browser so you can log in and save fresh cookies.
+    </p>
+  </div>
+  <div class="px-5 py-4 space-y-3">
+    <div id="auth-status" class="text-sm text-gray-500 hidden"></div>
+    <div class="flex gap-3">
+      <button id="btn-auth-start" onclick="startAuth()"
+              class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold
+                     px-4 py-2 rounded-lg shadow-sm transition-colors">
+        Open Amazon Browser
+      </button>
+      <button id="btn-auth-done" onclick="completeAuth()" disabled
+              class="bg-green-600 disabled:opacity-40 hover:bg-green-700 text-white text-sm
+                     font-semibold px-4 py-2 rounded-lg shadow-sm transition-colors">
+        I've Logged In
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Sync log -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+    <h2 class="font-semibold text-gray-700">Sync Log</h2>
+    <button onclick="clearLogs()"
+            class="text-xs text-gray-400 hover:text-red-500 transition-colors">
+      Clear
+    </button>
+  </div>
+  <div id="log-container" class="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+    {% if logs %}
+      {% for entry in logs %}
+        <div class="px-5 py-2 flex gap-3 text-xs font-mono">
+          <span class="text-gray-400 shrink-0">{{ entry.timestamp }}</span>
+          <span class="shrink-0
+            {% if entry.level == 'ERROR' %}text-red-600 font-bold
+            {% elif entry.level == 'WARNING' %}text-yellow-600 font-bold
+            {% else %}text-blue-600{% endif %}">
+            {{ entry.level }}
+          </span>
+          <span class="text-gray-700 break-all">{{ entry.message }}</span>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="px-5 py-4 text-sm text-gray-400 italic">No log entries yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  async function startAuth() {
+    const statusEl = document.getElementById('auth-status');
+    const doneBtn  = document.getElementById('btn-auth-done');
+    statusEl.textContent = 'Opening browser...';
+    statusEl.classList.remove('hidden');
+
+    const res = await fetch('/auth/start', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.status === 'already_running') {
+      statusEl.textContent = 'Browser auth already in progress.';
+      doneBtn.disabled = false;
+      return;
+    }
+
+    statusEl.textContent = 'Browser opened — log in to Amazon, then click "I\'ve Logged In".';
+    doneBtn.disabled = false;
+
+    // Poll status in background
+    pollAuthStatus();
+  }
+
+  async function pollAuthStatus() {
+    const statusEl = document.getElementById('auth-status');
+    const interval = setInterval(async () => {
+      const res = await fetch('/auth/status');
+      const data = await res.json();
+      if (data.status === 'waiting') {
+        statusEl.textContent = 'Waiting for you to log in…';
+      } else if (data.status === 'done' || data.status === 'idle') {
+        statusEl.textContent = '✓ Cookies saved successfully.';
+        document.getElementById('btn-auth-done').disabled = true;
+        clearInterval(interval);
+      } else if (data.status === 'error') {
+        statusEl.textContent = `✖ Auth error: ${data.error}`;
+        clearInterval(interval);
+      }
+    }, 1500);
+  }
+
+  async function completeAuth() {
+    const statusEl = document.getElementById('auth-status');
+    statusEl.textContent = 'Extracting cookies…';
+    document.getElementById('btn-auth-done').disabled = true;
+
+    const res = await fetch('/auth/complete', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.ok) {
+      statusEl.textContent = `✓ ${data.count} cookies saved.`;
+    } else {
+      statusEl.textContent = `✖ ${data.error}`;
+      document.getElementById('btn-auth-done').disabled = false;
+    }
+  }
+
+  async function clearLogs() {
+    await fetch('/api/logs/clear', { method: 'POST' });
+    document.getElementById('log-container').innerHTML =
+      '<p class="px-5 py-4 text-sm text-gray-400 italic">No log entries yet.</p>';
+  }
+</script>
+
+{% endblock %}

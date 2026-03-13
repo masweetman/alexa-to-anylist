@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — Alexa → AnyList{% endblock %}
+
+{% block content %}
+
+<h1 class="text-2xl font-bold text-gray-800">Settings</h1>
+
+<form method="post" action="/settings" class="space-y-6">
+
+  <!-- AnyList credentials -->
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div class="px-5 py-4 border-b border-gray-100">
+      <h2 class="font-semibold text-gray-700">AnyList Account</h2>
+    </div>
+    <div class="px-5 py-5 space-y-4">
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="anylist_email">
+          Email
+        </label>
+        <input id="anylist_email" name="anylist_email" type="email"
+               value="{{ s.get('anylist_email', '') }}"
+               placeholder="you@example.com"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="anylist_password">
+          Password
+          <span class="text-gray-400 font-normal">(leave blank to keep current)</span>
+        </label>
+        <input id="anylist_password" name="anylist_password" type="password"
+               placeholder="••••••••"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="anylist_list_name">
+          Target List Name
+        </label>
+        <input id="anylist_list_name" name="anylist_list_name" type="text"
+               value="{{ s.get('anylist_list_name', 'Shopping List') }}"
+               placeholder="Shopping List"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <p class="text-xs text-gray-400 mt-1">Must match the list name exactly as it appears in AnyList.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Amazon / Alexa settings -->
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div class="px-5 py-4 border-b border-gray-100">
+      <h2 class="font-semibold text-gray-700">Amazon / Alexa</h2>
+    </div>
+    <div class="px-5 py-5 space-y-4">
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="amazon_url">
+          Amazon Base URL
+        </label>
+        <input id="amazon_url" name="amazon_url" type="url"
+               value="{{ s.get('amazon_url', 'https://www.amazon.com') }}"
+               placeholder="https://www.amazon.com"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                      focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <p class="text-xs text-gray-400 mt-1">
+          Change to your regional URL (e.g. <code>https://www.amazon.co.uk</code>).
+        </p>
+      </div>
+
+      <!-- Cookies JSON -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="amazon_cookies">
+          Amazon Session Cookies
+          <span class="text-gray-400 font-normal">(JSON array)</span>
+        </label>
+        {% if s.get('cookies_updated_at') %}
+          <p class="text-xs text-green-600 mb-1">✓ Last saved: {{ s.get('cookies_updated_at') }}</p>
+        {% else %}
+          <p class="text-xs text-yellow-600 mb-1">⚠ No cookies saved yet.</p>
+        {% endif %}
+        <textarea id="amazon_cookies" name="amazon_cookies" rows="6"
+                  placeholder='[{"name":"session-id","value":"...","domain":".amazon.com","path":"/"},...]'
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"></textarea>
+        <p class="text-xs text-gray-400 mt-1">
+          Export from <code>amazon.com</code> using the
+          <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm"
+             target="_blank" class="underline">Cookie-Editor</a> browser extension
+          (Export → JSON format), or use the "Open Amazon Browser" button on the Dashboard.
+          Leave blank to keep the current cookies.
+        </p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Save button -->
+  <div class="flex justify-end">
+    <button type="submit"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm
+                   px-6 py-2 rounded-lg shadow-sm transition-colors">
+      Save Settings
+    </button>
+  </div>
+
+</form>
+
+{% endblock %}

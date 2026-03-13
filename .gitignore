@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Flask / app runtime
+instance/
+*.db
+*.sqlite
+*.sqlite3
+.anylist_credentials
+
+# Secrets & session data
+.env
+.env.*
+secret_key
+
+# Byte-compiled / optimised
+*.egg-info/
+dist/
+build/
+*.egg
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+/tmp/
